@@ -1,10 +1,9 @@
-from collections.abc import Generator
-from sqlalchemy.orm import Session
+from collections.abc import AsyncGenerator
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from database.connection import SessionLocal
 
-def get_database() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
+
+async def get_database() -> AsyncGenerator[AsyncSession, None]:
+    async with SessionLocal() as db:
         yield db
-    finally:
-        db.close()

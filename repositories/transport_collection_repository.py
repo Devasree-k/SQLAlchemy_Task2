@@ -1,39 +1,53 @@
 
 from sqlalchemy import select
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy.orm import Session, joinedload
 
 from models.driver_model import Driver
 from models.transport_collection_model import TransportCollection
 
 
-def get_driver(db: Session, driver_id: int):
-    return db.get(Driver, driver_id)
+class TransportCollectionRepository:
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_driver(self, driver_id: int):
+        return await self.db.get(Driver, driver_id)
 
 
-def create(db: Session, collection: TransportCollection):
-    db.add(collection)
-    db.flush()
-    return collection
+    async def create(self, collection: TransportCollection):
+        self.db.add(collection)
+        await self.db.flush()
+        return collection
 
 
-def get_by_id(db: Session, collection_id: int):
-    statement = (
-        select(TransportCollection)
-        .options(joinedload(TransportCollection.driver))
-        .where(TransportCollection.id == collection_id)
-    )
-    return db.scalars(statement).unique().first()
+    async def get_by_id(self, collection_id: int):
+        statement = (
+            select(TransportCollection)
+            .options(joinedload(TransportCollection.driver))
+            .where(TransportCollection.id == collection_id)
+        )
+        result = await self.db.scalars(statement)
+
+        return result.unique().first()
 
 
-def get_all(db: Session):
-    statement = (
-        select(TransportCollection)
-        .options(joinedload(TransportCollection.driver))
-        .order_by(TransportCollection.id)
-    )
-    return list(db.scalars(statement).unique().all())
+    async def get_all(self):
+        statement = (
+            select(TransportCollection)
+            .options(joinedload(TransportCollection.driver))
+            .order_by(TransportCollection.id)
+        )
+        # return await list(self.db.scalars(statement).unique().all())
+        result = await self.db.scalars(statement)
+
+        return list(result.unique().all())
 
 
-def delete(db: Session, collection: TransportCollection):
-    db.delete(collection)
-    db.flush()
+    async def delete(self, collection: TransportCollection) -> None:
+        await self.db.delete(collection)
+        await self.db.flush()
+

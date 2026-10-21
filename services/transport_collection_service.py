@@ -1,185 +1,136 @@
-# from decimal import Decimal
-# from fastapi import HTTPException
-# from sqlalchemy import select
-# from sqlalchemy.orm import Session, joinedload
-# from models.driver_model import Driver
-# from models.transport_collection_model import TransportCollection
-
-# def calculate_totals(data: dict) -> dict:
-#     total_trips = data["morning_trips"] + data["evening_trips"]
-#     total_collection = data["morning_collection"] + data["evening_collection"]
-#     total_expense = data["fuel_expense"] + data["other_expense"]
-#     return {
-#         "total_trips": total_trips,
-#         "total_collection": total_collection,
-#         "total_expense": total_expense,
-#         "net_collection": total_collection - total_expense,
-#     }
-
-# def collection_query():
-#     # Load the related Driver in the same SQL query.
-#     return select(TransportCollection).options(
-#         joinedload(TransportCollection.driver)
-#     )
-
-# def get_collection_or_404(db: Session, collection_id: int):
-#     statement = collection_query().where(TransportCollection.id == collection_id)
-#     collection = db.scalars(statement).unique().first()
-#     if collection is None:
-#         raise HTTPException(status_code=404, detail="Collection not found")
-#     return collection
-
-# def create_collection(db: Session, data):
-#     values = data.model_dump()
-#     if db.get(Driver, values["driver_id"]) is None:
-#         raise HTTPException(status_code=404, detail="Driver not found")
-#     values.update(calculate_totals(values))
-#     collection = TransportCollection(**values)
-#     db.add(collection)
-#     db.commit()
-#     return get_collection_or_404(db, collection.id)
-
-# def get_collections(db: Session):
-#     statement = collection_query().order_by(TransportCollection.id)
-#     return list(db.scalars(statement).unique().all())
-
-# def get_collection(db: Session, collection_id: int):
-#     return get_collection_or_404(db, collection_id)
-
-# def update_collection(db: Session, collection_id: int, changes: dict):
-#     collection = get_collection_or_404(db, collection_id)
-#     values = {
-#         "driver_id": collection.driver_id,
-#         "vehicle_number": collection.vehicle_number,
-#         "collection_date": collection.collection_date,
-#         "morning_trips": collection.morning_trips,
-#         "evening_trips": collection.evening_trips,
-#         "morning_collection": collection.morning_collection,
-#         "evening_collection": collection.evening_collection,
-#         "fuel_expense": collection.fuel_expense,
-#         "other_expense": collection.other_expense,
-#     }
-#     values.update(changes)
-#     if db.get(Driver, values["driver_id"]) is None:
-#         raise HTTPException(status_code=404, detail="Driver not found")
-#     for field, value in changes.items():
-#         setattr(collection, field, value)
-#     for field, value in calculate_totals(values).items():
-#         setattr(collection, field, value)
-#     db.commit()
-#     return get_collection_or_404(db, collection_id)
-
-# def delete_collection(db: Session, collection_id: int):
-#     collection = get_collection_or_404(db, collection_id)
-#     db.delete(collection)
-#     db.commit()
-#     return {"message": "Collection deleted"}
-
-from decimal import Decimal
-
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.transport_collection_model import TransportCollection
-from repositories import transport_collection_repository as repository
+from repositories.transport_collection_repository import (
+    TransportCollectionRepository,
+)
 
 
-def calculate_totals(data: dict) -> dict:
-    total_trips = data["morning_trips"] + data["evening_trips"]
-    total_collection = (
-        data["morning_collection"] + data["evening_collection"]
-    )
-    total_expense = data["fuel_expense"] + data["other_expense"]
+class TransportCollectionService:
 
-    return {
-        "total_trips": total_trips,
-        "total_collection": total_collection,
-        "total_expense": total_expense,
-        "net_collection": total_collection - total_expense,
-    }
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.repository = TransportCollectionRepository(db)
 
-
-def get_collection_or_404(db: Session, collection_id: int):
-    collection = repository.get_by_id(db, collection_id)
-
-    if collection is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Collection not found",
+    def calculate_totals(self, data: dict) -> dict:
+        total_trips = (
+            data["morning_trips"] + data["evening_trips"]
         )
 
-    return collection
+        total_collection = (
+            data["morning_collection"] + data["evening_collection"]
+        )
 
+        total_expense = (
+            data["fuel_expense"] + data["other_expense"]
+        )
 
-def create_collection(db: Session, data):
-    values = data.model_dump()
+        return {
+            "total_trips": total_trips,
+            "total_collection": total_collection,
+            "total_expense": total_expense,
+            "net_collection": total_collection - total_expense,
+        }
 
-    if repository.get_driver(db, values["driver_id"]) is None:
-        raise HTTPException(status_code=404, detail="Driver not found")
+    async def get_collection(self, collection_id: int):
+        collection = await self.repository.get_by_id(collection_id)
 
-    values.update(calculate_totals(values))
-    collection = TransportCollection(**values)
+        if collection is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Collection not found",
+            )
 
-    try:
-        repository.create(db, collection)
-        db.commit()
-        return get_collection_or_404(db, collection.id)
-    except Exception:
-        db.rollback()
-        raise
+        return collection
 
+    async def create_collection(self, data):
+        values = data.model_dump()
 
-def get_collections(db: Session):
-    return repository.get_all(db)
+        driver = await self.repository.get_driver(
+            values["driver_id"]
+        )
 
+        if driver is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Driver not found",
+            )
 
-def get_collection(db: Session, collection_id: int):
-    return get_collection_or_404(db, collection_id)
+        values.update(self.calculate_totals(values))
 
+        collection = TransportCollection(**values)
 
-def update_collection(db: Session, collection_id: int, changes: dict):
-    collection = get_collection_or_404(db, collection_id)
+        try:
+            await self.repository.create(collection)
+            await self.db.commit()
 
-    values = {
-        "driver_id": collection.driver_id,
-        "vehicle_number": collection.vehicle_number,
-        "collection_date": collection.collection_date,
-        "morning_trips": collection.morning_trips,
-        "evening_trips": collection.evening_trips,
-        "morning_collection": collection.morning_collection,
-        "evening_collection": collection.evening_collection,
-        "fuel_expense": collection.fuel_expense,
-        "other_expense": collection.other_expense,
-    }
+            return await self.get_collection(collection.id)
 
-    values.update(changes)
+        except Exception:
+            await self.db.rollback()
+            raise
 
-    if repository.get_driver(db, values["driver_id"]) is None:
-        raise HTTPException(status_code=404, detail="Driver not found")
+    async def get_collections(self):
+        return await self.repository.get_all()
 
-    calculated = calculate_totals(values)
+    async def update_collection(
+        self,
+        collection_id: int,
+        changes: dict,
+    ):
+        collection = await self.get_collection(collection_id)
 
-    try:
-        for field, value in changes.items():
-            setattr(collection, field, value)
+        values = {
+            "driver_id": collection.driver_id,
+            "vehicle_number": collection.vehicle_number,
+            "collection_date": collection.collection_date,
+            "morning_trips": collection.morning_trips,
+            "evening_trips": collection.evening_trips,
+            "morning_collection": collection.morning_collection,
+            "evening_collection": collection.evening_collection,
+            "fuel_expense": collection.fuel_expense,
+            "other_expense": collection.other_expense,
+        }
 
-        for field, value in calculated.items():
-            setattr(collection, field, value)
+        values.update(changes)
 
-        db.commit()
-        return get_collection_or_404(db, collection_id)
-    except Exception:
-        db.rollback()
-        raise
+        driver = await self.repository.get_driver(
+            values["driver_id"]
+        )
 
+        if driver is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Driver not found",
+            )
 
-def delete_collection(db: Session, collection_id: int):
-    collection = get_collection_or_404(db, collection_id)
+        calculated = self.calculate_totals(values)
 
-    try:
-        repository.delete(db, collection)
-        db.commit()
-        return {"message": "Collection deleted"}
-    except Exception:
-        db.rollback()
-        raise
+        try:
+            for field, value in changes.items():
+                setattr(collection, field, value)
+
+            for field, value in calculated.items():
+                setattr(collection, field, value)
+
+            await self.db.commit()
+
+            return await self.get_collection(collection_id)
+
+        except Exception:
+            await self.db.rollback()
+            raise
+
+    async def delete_collection(self, collection_id: int):
+        collection = await self.get_collection(collection_id)
+
+        try:
+            await self.repository.delete(collection)
+            await self.db.commit()
+
+            return {"message": "Collection deleted"}
+
+        except Exception:
+            await self.db.rollback()
+            raise

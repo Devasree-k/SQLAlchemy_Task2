@@ -5,7 +5,7 @@ from sqlalchemy.engine import URL
 load_dotenv()
 
 DATABASE_URL = URL.create(
-    "postgresql+psycopg2",
+    "postgresql+asyncpg",
     username=os.getenv("DB_USER"),
     password=os.getenv("DB_PASSWORD"),
     host=os.getenv("DB_HOST"),
